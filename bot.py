@@ -30,6 +30,20 @@ def word_to_dict(row: tuple) -> dict:
     }
 
 
+def verb_to_dict(row: tuple) -> dict:
+    return {
+        "id": row[0],
+        "present": row[1],
+        "future": row[2],
+        "past": row[3],
+        "translation": row[4],
+        "notes": row[5],
+        "ease": row[6],
+        "interval": row[7],
+        "reps": row[8],
+    }
+
+
 async def generate_example(greek_word: str, translation: str):
     if not OPENAI_API_KEY:
         return None, None
@@ -124,12 +138,36 @@ async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
     await reply_fn(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+async def send_verb_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
+    session: list = context.user_data.get("verb_session", [])
+    idx: int = context.user_data.get("verb_idx", 0)
+
+    if idx >= len(session):
+        await reply_fn(
+            "🎉 *Verb session complete!*\n\nUse /verbs for another session or /stats to see your progress.",
+            parse_mode="Markdown",
+        )
+        return
+
+    verb = session[idx]
+    total = len(session)
+    label = "🔁 Review" if verb["reps"] > 0 else "🆕 New"
+    text = (
+        f"*{idx + 1}/{total}* {label}\n\n"
+        f"🇬🇷 *{verb['present']}*\n"
+        f"🇷🇺 {verb['translation']}"
+    )
+    keyboard = [[InlineKeyboardButton("👁 Show future/past", callback_data=f"vshow:{verb['id']}")]]
+    await reply_fn(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
 # ── command handlers ──────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🇬🇷 *Greek A2 Trainer*\n\n"
         "*/study* — start a flashcard session\n"
+        "*/verbs* — practice future and past verb forms\n"
         "*/stats* — see your progress\n\n"
         "Each session gives you up to 30 due reviews + 15 new words.\n"
         "Rate each card: ✅ Know it · 🤔 Hard · ❌ Don't know",
@@ -151,16 +189,38 @@ async def cmd_study(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_card(update.message.reply_text, context)
 
 
+async def cmd_verbs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    rows = db.get_verb_session(user_id, max_reviews=15, max_new=10)
+    if not rows:
+        await update.message.reply_text(
+            "✅ No verb forms due right now — come back tomorrow!\nUse /stats to see your progress."
+        )
+        return
+
+    context.user_data["verb_session"] = [verb_to_dict(r) for r in rows]
+    context.user_data["verb_idx"] = 0
+    await send_verb_card(update.message.reply_text, context)
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     s = db.get_stats(user_id)
+    vs = db.get_verb_stats(user_id)
     pct = round(s["seen"] / s["total"] * 100) if s["total"] else 0
+    verb_pct = round(vs["seen"] / vs["total"] * 100) if vs["total"] else 0
     await update.message.reply_text(
         f"📊 *Your progress*\n\n"
-        f"Total words: {s['total']}\n"
+        f"*Words*\n"
+        f"Total: {s['total']}\n"
         f"Seen: {s['seen']} ({pct}%)\n"
-        f"Well-learned (interval ≥ 21d): {s['known']}\n"
-        f"Due today: {s['due']}",
+        f"Well-learned: {s['known']}\n"
+        f"Due today: {s['due']}\n\n"
+        f"*Verb forms*\n"
+        f"Total: {vs['total']}\n"
+        f"Seen: {vs['seen']} ({verb_pct}%)\n"
+        f"Well-learned: {vs['known']}\n"
+        f"Due today: {vs['due']}",
         parse_mode="Markdown",
     )
 
@@ -229,6 +289,54 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["idx"] = context.user_data.get("idx", 0) + 1
         await send_card(query.message.reply_text, context)
 
+    elif data.startswith("vshow:"):
+        verb_id = int(data.split(":")[1])
+        session: list = context.user_data.get("verb_session", [])
+        idx: int = context.user_data.get("verb_idx", 0)
+        verb = next((v for v in session if v["id"] == verb_id), None)
+        if not verb:
+            await query.edit_message_text("Verb session expired. Use /verbs to start again.")
+            return
+
+        total = len(session)
+        notes = f"\n_{verb['notes']}_" if verb["notes"] else ""
+        text = (
+            f"*{idx + 1}/{total}*\n\n"
+            f"🇬🇷 *{verb['present']}*\n"
+            f"🔮 Future: *{verb['future']}*\n"
+            f"🕰 Past: *{verb['past']}*\n"
+            f"🇷🇺 {verb['translation']}"
+            f"{notes}\n\n"
+            f"How well did you know these forms?"
+        )
+        keyboard = [[
+            InlineKeyboardButton("✅ Know it", callback_data=f"vrate:{verb_id}:5"),
+            InlineKeyboardButton("🤔 Hard",    callback_data=f"vrate:{verb_id}:3"),
+            InlineKeyboardButton("❌ No idea", callback_data=f"vrate:{verb_id}:0"),
+        ]]
+        await query.edit_message_text(
+            text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif data.startswith("vrate:"):
+        _, verb_id_str, quality_str = data.split(":")
+        verb_id = int(verb_id_str)
+        quality = int(quality_str)
+        user_id = update.effective_user.id
+
+        session: list = context.user_data.get("verb_session", [])
+        verb = next((v for v in session if v["id"] == verb_id), None)
+        if verb:
+            ef, interval, reps, next_review = srs.sm2(
+                verb["ease"], verb["interval"], verb["reps"], quality
+            )
+            db.update_verb_progress(user_id, verb_id, ef, interval, reps, next_review)
+
+        await query.edit_message_reply_markup(reply_markup=None)
+
+        context.user_data["verb_idx"] = context.user_data.get("verb_idx", 0) + 1
+        await send_verb_card(query.message.reply_text, context)
+
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
@@ -238,10 +346,12 @@ def main():
 
     db.init_db()
     db.load_words()
+    db.load_verb_forms()
 
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("study", cmd_study))
+    app.add_handler(CommandHandler("verbs", cmd_verbs))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CallbackQueryHandler(on_callback))
 

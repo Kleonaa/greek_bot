@@ -2,6 +2,12 @@
 
 A Telegram bot for studying Greek vocabulary with spaced repetition and generated examples.
 
+Commands:
+
+- `/study` - practice vocabulary cards.
+- `/verbs` - practice future and past forms of common verbs.
+- `/stats` - see vocabulary and verb-form progress.
+
 ## Railway deployment
 
 1. Push this repository to GitHub.
