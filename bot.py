@@ -57,6 +57,53 @@ async def generate_example(greek_word: str, translation: str):
     return None, None
 
 
+async def ensure_word_example(word: dict):
+    if word["example_gr"] or not OPENAI_API_KEY:
+        return word["example_gr"], word["example_ru"]
+
+    gr, ru = await generate_example(word["greek"], word["translation"])
+    if gr:
+        db.save_example(word["id"], gr, ru)
+        word["example_gr"] = gr
+        word["example_ru"] = ru
+    return gr, ru
+
+
+def schedule_example_generation(word: dict, context: ContextTypes.DEFAULT_TYPE):
+    if word["example_gr"] or not OPENAI_API_KEY:
+        return
+
+    tasks = context.application.bot_data.setdefault("example_tasks", {})
+    word_id = word["id"]
+    task = tasks.get(word_id)
+    if task and not task.done():
+        return
+
+    async def run():
+        try:
+            return await ensure_word_example(word)
+        finally:
+            tasks.pop(word_id, None)
+
+    tasks[word_id] = context.application.create_task(run())
+
+
+async def get_example(word: dict, context: ContextTypes.DEFAULT_TYPE):
+    if word["example_gr"] or not OPENAI_API_KEY:
+        return word["example_gr"], word["example_ru"]
+
+    tasks = context.application.bot_data.setdefault("example_tasks", {})
+    task = tasks.get(word["id"])
+    if task and not task.done():
+        gr, ru = await task
+        if gr:
+            word["example_gr"] = gr
+            word["example_ru"] = ru
+        return gr, ru
+
+    return await ensure_word_example(word)
+
+
 async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
     session: list = context.user_data.get("session", [])
     idx: int = context.user_data.get("idx", 0)
@@ -69,6 +116,7 @@ async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
         return
 
     word = session[idx]
+    schedule_example_generation(word, context)
     total = len(session)
     label = "🔁 Review" if word["reps"] > 0 else "🆕 New"
     text = f"*{idx + 1}/{total}* {label}\n\n🇬🇷 *{word['greek']}*"
@@ -138,12 +186,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if word["example_gr"]:
             example_text = f"\n\n📝 _{word['example_gr']}_\n_{word['example_ru']}_"
         elif OPENAI_API_KEY:
-            await query.edit_message_text("⏳ Generating example…")
-            gr, ru = await generate_example(word["greek"], word["translation"])
+            await query.edit_message_text("⏳ Finishing example…")
+            gr, ru = await get_example(word, context)
             if gr:
-                db.save_example(word_id, gr, ru)
-                word["example_gr"] = gr
-                word["example_ru"] = ru
                 example_text = f"\n\n📝 _{gr}_\n_{ru}_"
 
         total = len(session)
