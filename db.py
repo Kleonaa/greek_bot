@@ -256,6 +256,21 @@ def get_verb_session(user_id: int, max_reviews: int = 15, max_new: int = 10):
     return list(reviews) + list(new_forms)
 
 
+def get_verb_forms_by_present(present: str):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    row = c.execute(
+        """
+        SELECT future, past
+        FROM verb_forms
+        WHERE present = ?
+        """,
+        (present,),
+    ).fetchone()
+    conn.close()
+    return row
+
+
 def update_progress(
     user_id: int,
     word_id: int,

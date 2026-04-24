@@ -133,6 +133,15 @@ def format_example_text(greek: str | None, russian: str | None, form: str | None
     return f"\n\n📝 _{greek}_\n_{russian}_{form_text}"
 
 
+def format_word_verb_forms(greek_word: str):
+    forms = db.get_verb_forms_by_present(greek_word)
+    if not forms:
+        return ""
+
+    future, past = forms
+    return f"\n\n🔮 Future: *{future}*\n🕰 Past: *{past}*"
+
+
 async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
     session: list = context.user_data.get("session", [])
     idx: int = context.user_data.get("idx", 0)
@@ -256,6 +265,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Session expired. Use /study to start again.")
             return
 
+        verb_forms_text = format_word_verb_forms(word["greek"])
+
         # Fetch / generate example
         example_text = ""
         if word["example_gr"]:
@@ -273,6 +284,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"*{idx + 1}/{total}*\n\n"
             f"🇬🇷 *{word['greek']}*\n"
             f"🇷🇺 {word['translation']}"
+            f"{verb_forms_text}"
             f"{example_text}\n\n"
             f"How well did you know it?"
         )
