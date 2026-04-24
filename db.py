@@ -1,3 +1,4 @@
+import csv
 import os
 import sqlite3
 from datetime import date
@@ -6,6 +7,15 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "greek.db"))
 WORDS_FILE = BASE_DIR / "words.txt"
+RANKED_WORDS_FILE = BASE_DIR / "data" / "words_ranked.csv"
+LEARNING_ORDER_FILE = BASE_DIR / "data" / "learning_order.csv"
+
+
+def add_column_if_missing(cursor, table: str, existing_columns: set[str], column: str):
+    column_name = column.split()[0]
+    if column_name not in existing_columns:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+        existing_columns.add(column_name)
 
 
 def init_db():
@@ -23,10 +33,10 @@ def init_db():
     """)
     c.execute("PRAGMA table_info(words)")
     columns = {row[1] for row in c.fetchall()}
-    if "example_gr" not in columns:
-        c.execute("ALTER TABLE words ADD COLUMN example_gr TEXT")
-    if "example_ru" not in columns:
-        c.execute("ALTER TABLE words ADD COLUMN example_ru TEXT")
+    add_column_if_missing(c, "words", columns, "example_gr TEXT")
+    add_column_if_missing(c, "words", columns, "example_ru TEXT")
+    add_column_if_missing(c, "words", columns, "frequency_rank INTEGER")
+    add_column_if_missing(c, "words", columns, "learning_order INTEGER")
     c.execute("""
         CREATE TABLE IF NOT EXISTS progress (
             user_id INTEGER NOT NULL,
@@ -42,14 +52,27 @@ def init_db():
     conn.close()
 
 
-def load_words():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM words")
-    if c.fetchone()[0] > 0:
-        conn.close()
+def read_word_rows():
+    ordered_words_file = (
+        LEARNING_ORDER_FILE if LEARNING_ORDER_FILE.exists() else RANKED_WORDS_FILE
+    )
+    if ordered_words_file.exists():
+        with ordered_words_file.open(encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                greek = row["greek"].strip()
+                translation = row["translation"].strip()
+                frequency_rank = row["greeklex_rank"].strip()
+                learning_order = row["learning_order"].strip()
+                if greek and translation:
+                    yield (
+                        greek,
+                        translation,
+                        int(frequency_rank) if frequency_rank else None,
+                        int(learning_order) if learning_order else None,
+                    )
         return
-    with open(WORDS_FILE, encoding="utf-8") as f:
+
+    with WORDS_FILE.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line or "–" not in line:
@@ -58,14 +81,44 @@ def load_words():
             greek = parts[0].strip()
             translation = parts[1].strip()
             if greek and translation:
-                c.execute(
-                    "INSERT INTO words (greek, translation) VALUES (?, ?)",
-                    (greek, translation),
-                )
+                yield greek, translation, None, None
+
+
+def load_words():
+    word_rows = list(read_word_rows())
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM words")
+    existing_count = c.fetchone()[0]
+
+    if existing_count == 0:
+        for greek, translation, frequency_rank, learning_order in word_rows:
+            c.execute(
+                """
+                INSERT INTO words (greek, translation, frequency_rank, learning_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                (greek, translation, frequency_rank, learning_order),
+            )
+    else:
+        for greek, translation, frequency_rank, learning_order in word_rows:
+            c.execute(
+                """
+                UPDATE words
+                SET translation = ?,
+                    frequency_rank = ?,
+                    learning_order = ?
+                WHERE greek = ?
+                """,
+                (translation, frequency_rank, learning_order, greek),
+            )
     conn.commit()
     count = c.execute("SELECT COUNT(*) FROM words").fetchone()[0]
     conn.close()
-    print(f"Loaded {count} words into database.")
+    if existing_count == 0:
+        print(f"Loaded {count} words into database.")
+    else:
+        print(f"Updated word ordering metadata for {count} words.")
 
 
 def get_session_words(user_id: int, max_reviews: int = 30, max_new: int = 15):
@@ -94,7 +147,7 @@ def get_session_words(user_id: int, max_reviews: int = 30, max_new: int = 15):
         FROM words w
         LEFT JOIN progress p ON p.word_id = w.id AND p.user_id = ?
         WHERE p.word_id IS NULL
-        ORDER BY w.id
+        ORDER BY COALESCE(w.learning_order, w.frequency_rank, w.id)
         LIMIT ?
         """,
         (user_id, max_new),
