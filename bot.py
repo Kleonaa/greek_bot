@@ -24,9 +24,10 @@ def word_to_dict(row: tuple) -> dict:
         "translation": row[2],
         "example_gr": row[3],
         "example_ru": row[4],
-        "ease": row[5],
-        "interval": row[6],
-        "reps": row[7],
+        "example_form": row[5],
+        "ease": row[6],
+        "interval": row[7],
+        "reps": row[8],
     }
 
 
@@ -46,7 +47,7 @@ def verb_to_dict(row: tuple) -> dict:
 
 async def generate_example(greek_word: str, translation: str):
     if not OPENAI_API_KEY:
-        return None, None
+        return None, None, None
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -55,32 +56,37 @@ async def generate_example(greek_word: str, translation: str):
             messages=[{
                 "role": "user",
                 "content": (
-                    f"Write one short A2-level Greek sentence using the word '{greek_word}' "
-                    f"(meaning: {translation}), then its Russian translation. "
-                    "Format exactly: <Greek sentence> | <Russian translation>. No extra text."
+                    f"Write one short natural A2-level Greek sentence using '{greek_word}' "
+                    f"(meaning: {translation}). You may use a natural inflected form "
+                    "(case, plural, gender, tense, or person) instead of the dictionary form. "
+                    "Then give the Russian translation and the exact Greek form used from "
+                    "that word family. Format exactly: "
+                    "<Greek sentence> | <Russian translation> | <Greek form used>. No extra text."
                 ),
             }],
             max_tokens=120,
         )
         text = resp.choices[0].message.content.strip()
         if "|" in text:
-            gr, ru = text.split("|", 1)
-            return gr.strip(), ru.strip()
+            parts = [part.strip() for part in text.split("|")]
+            if len(parts) >= 3:
+                return parts[0], parts[1], parts[2]
     except Exception as e:
         logging.warning(f"OpenAI error: {e}")
-    return None, None
+    return None, None, None
 
 
 async def ensure_word_example(word: dict):
     if word["example_gr"] or not OPENAI_API_KEY:
-        return word["example_gr"], word["example_ru"]
+        return word["example_gr"], word["example_ru"], word.get("example_form")
 
-    gr, ru = await generate_example(word["greek"], word["translation"])
+    gr, ru, form = await generate_example(word["greek"], word["translation"])
     if gr:
-        db.save_example(word["id"], gr, ru)
+        db.save_example(word["id"], gr, ru, form or word["greek"])
         word["example_gr"] = gr
         word["example_ru"] = ru
-    return gr, ru
+        word["example_form"] = form or word["greek"]
+    return gr, ru, form
 
 
 def schedule_example_generation(word: dict, context: ContextTypes.DEFAULT_TYPE):
@@ -104,18 +110,27 @@ def schedule_example_generation(word: dict, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_example(word: dict, context: ContextTypes.DEFAULT_TYPE):
     if word["example_gr"] or not OPENAI_API_KEY:
-        return word["example_gr"], word["example_ru"]
+        return word["example_gr"], word["example_ru"], word.get("example_form")
 
     tasks = context.application.bot_data.setdefault("example_tasks", {})
     task = tasks.get(word["id"])
     if task and not task.done():
-        gr, ru = await task
+        gr, ru, form = await task
         if gr:
             word["example_gr"] = gr
             word["example_ru"] = ru
-        return gr, ru
+            word["example_form"] = form or word["greek"]
+        return gr, ru, form
 
     return await ensure_word_example(word)
+
+
+def format_example_text(greek: str | None, russian: str | None, form: str | None):
+    if not greek:
+        return ""
+
+    form_text = f"\n_Form used: {form}_" if form else ""
+    return f"\n\n📝 _{greek}_\n_{russian}_{form_text}"
 
 
 async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
@@ -244,12 +259,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Fetch / generate example
         example_text = ""
         if word["example_gr"]:
-            example_text = f"\n\n📝 _{word['example_gr']}_\n_{word['example_ru']}_"
+            example_text = format_example_text(
+                word["example_gr"], word["example_ru"], word.get("example_form")
+            )
         elif OPENAI_API_KEY:
             await query.edit_message_text("⏳ Finishing example…")
-            gr, ru = await get_example(word, context)
+            gr, ru, form = await get_example(word, context)
             if gr:
-                example_text = f"\n\n📝 _{gr}_\n_{ru}_"
+                example_text = format_example_text(gr, ru, form)
 
         total = len(session)
         text = (

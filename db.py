@@ -36,6 +36,7 @@ def init_db():
     columns = {row[1] for row in c.fetchall()}
     add_column_if_missing(c, "words", columns, "example_gr TEXT")
     add_column_if_missing(c, "words", columns, "example_ru TEXT")
+    add_column_if_missing(c, "words", columns, "example_form TEXT")
     add_column_if_missing(c, "words", columns, "frequency_rank INTEGER")
     add_column_if_missing(c, "words", columns, "learning_order INTEGER")
     c.execute("""
@@ -190,7 +191,7 @@ def get_session_words(user_id: int, max_reviews: int = 30, max_new: int = 15):
 
     c.execute(
         """
-        SELECT w.id, w.greek, w.translation, w.example_gr, w.example_ru,
+        SELECT w.id, w.greek, w.translation, w.example_gr, w.example_ru, w.example_form,
                p.ease_factor, p.interval, p.repetitions
         FROM words w
         JOIN progress p ON p.word_id = w.id AND p.user_id = ?
@@ -204,7 +205,7 @@ def get_session_words(user_id: int, max_reviews: int = 30, max_new: int = 15):
 
     c.execute(
         """
-        SELECT w.id, w.greek, w.translation, w.example_gr, w.example_ru,
+        SELECT w.id, w.greek, w.translation, w.example_gr, w.example_ru, w.example_form,
                2.5, 0, 0
         FROM words w
         LEFT JOIN progress p ON p.word_id = w.id AND p.user_id = ?
@@ -309,12 +310,16 @@ def update_verb_progress(
     conn.close()
 
 
-def save_example(word_id: int, example_gr: str, example_ru: str):
+def save_example(word_id: int, example_gr: str, example_ru: str, example_form: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute(
-        "UPDATE words SET example_gr = ?, example_ru = ? WHERE id = ?",
-        (example_gr, example_ru, word_id),
+        """
+        UPDATE words
+        SET example_gr = ?, example_ru = ?, example_form = ?
+        WHERE id = ?
+        """,
+        (example_gr, example_ru, example_form, word_id),
     )
     conn.commit()
     conn.close()
