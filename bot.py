@@ -129,8 +129,7 @@ def format_example_text(greek: str | None, russian: str | None, form: str | None
     if not greek:
         return ""
 
-    form_text = f"\n_Form used: {form}_" if form else ""
-    return f"\n\n📝 _{greek}_\n_{russian}_{form_text}"
+    return f"\n\n📝 _{greek}_\n_{russian}_"
 
 
 def format_word_verb_forms(greek_word: str):
