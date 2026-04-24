@@ -1,12 +1,15 @@
 import os
 import sqlite3
 from datetime import date
+from pathlib import Path
 
-DB_PATH = os.getenv("DB_PATH", "greek.db")
-WORDS_FILE = "words.txt"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = Path(os.getenv("DB_PATH", BASE_DIR / "greek.db"))
+WORDS_FILE = BASE_DIR / "words.txt"
 
 
 def init_db():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
@@ -18,6 +21,12 @@ def init_db():
             example_ru TEXT
         )
     """)
+    c.execute("PRAGMA table_info(words)")
+    columns = {row[1] for row in c.fetchall()}
+    if "example_gr" not in columns:
+        c.execute("ALTER TABLE words ADD COLUMN example_gr TEXT")
+    if "example_ru" not in columns:
+        c.execute("ALTER TABLE words ADD COLUMN example_ru TEXT")
     c.execute("""
         CREATE TABLE IF NOT EXISTS progress (
             user_id INTEGER NOT NULL,
