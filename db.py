@@ -1,7 +1,7 @@
 import csv
 import os
 import sqlite3
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -342,6 +342,8 @@ def save_example(word_id: int, example_gr: str, example_ru: str, example_form: s
 
 def get_stats(user_id: int) -> dict:
     today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    next_week = (date.today() + timedelta(days=7)).isoformat()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     total = c.execute("SELECT COUNT(*) FROM words").fetchone()[0]
@@ -356,12 +358,45 @@ def get_stats(user_id: int) -> dict:
         "SELECT COUNT(*) FROM progress WHERE user_id = ? AND next_review <= ?",
         (user_id, today),
     ).fetchone()[0]
+    due_tomorrow = c.execute(
+        """
+        SELECT COUNT(*) FROM progress
+        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        """,
+        (user_id, today, tomorrow),
+    ).fetchone()[0]
+    due_week = c.execute(
+        """
+        SELECT COUNT(*) FROM progress
+        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        """,
+        (user_id, today, next_week),
+    ).fetchone()[0]
+    avg_ease = c.execute(
+        "SELECT AVG(ease_factor) FROM progress WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
+    examples = c.execute(
+        "SELECT COUNT(*) FROM words WHERE example_gr IS NOT NULL"
+    ).fetchone()[0]
     conn.close()
-    return {"total": total, "seen": seen, "known": known, "due": due}
+    return {
+        "total": total,
+        "seen": seen,
+        "unseen": total - seen,
+        "learning": seen - known,
+        "known": known,
+        "due": due,
+        "due_tomorrow": due_tomorrow,
+        "due_week": due_week,
+        "avg_ease": avg_ease or 0,
+        "examples": examples,
+    }
 
 
 def get_verb_stats(user_id: int) -> dict:
     today = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    next_week = (date.today() + timedelta(days=7)).isoformat()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     total = c.execute("SELECT COUNT(*) FROM verb_forms").fetchone()[0]
@@ -376,5 +411,32 @@ def get_verb_stats(user_id: int) -> dict:
         "SELECT COUNT(*) FROM verb_progress WHERE user_id = ? AND next_review <= ?",
         (user_id, today),
     ).fetchone()[0]
+    due_tomorrow = c.execute(
+        """
+        SELECT COUNT(*) FROM verb_progress
+        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        """,
+        (user_id, today, tomorrow),
+    ).fetchone()[0]
+    due_week = c.execute(
+        """
+        SELECT COUNT(*) FROM verb_progress
+        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        """,
+        (user_id, today, next_week),
+    ).fetchone()[0]
+    avg_ease = c.execute(
+        "SELECT AVG(ease_factor) FROM verb_progress WHERE user_id = ?", (user_id,)
+    ).fetchone()[0]
     conn.close()
-    return {"total": total, "seen": seen, "known": known, "due": due}
+    return {
+        "total": total,
+        "seen": seen,
+        "unseen": total - seen,
+        "learning": seen - known,
+        "known": known,
+        "due": due,
+        "due_tomorrow": due_tomorrow,
+        "due_week": due_week,
+        "avg_ease": avg_ease or 0,
+    }

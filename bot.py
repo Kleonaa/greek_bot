@@ -57,8 +57,12 @@ async def generate_example(greek_word: str, translation: str):
                 "role": "user",
                 "content": (
                     f"Write one short natural A2-level Greek sentence using '{greek_word}' "
-                    f"(meaning: {translation}). You may use a natural inflected form "
-                    "(case, plural, gender, tense, or person) instead of the dictionary form. "
+                    f"(meaning: {translation}). Use a natural inflected form when possible "
+                    "instead of simply repeating the dictionary form. For verbs, do not use "
+                    "first-person singular unless no other form sounds natural; prefer second "
+                    "person, third person, plural, future, or past forms. For nouns and "
+                    "adjectives, prefer a natural case, plural, gender, or agreement form "
+                    "when possible. "
                     "Then give the Russian translation and the exact Greek form used from "
                     "that word family. Format exactly: "
                     "<Greek sentence> | <Russian translation> | <Greek form used>. No extra text."
@@ -236,14 +240,17 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 *Your progress*\n\n"
         f"*Words*\n"
         f"Total: {s['total']}\n"
-        f"Seen: {s['seen']} ({pct}%)\n"
-        f"Well-learned: {s['known']}\n"
-        f"Due today: {s['due']}\n\n"
+        f"Seen: {s['seen']} ({pct}%) · New left: {s['unseen']}\n"
+        f"Learning: {s['learning']} · Mature: {s['known']}\n"
+        f"Due: today {s['due']} · tomorrow {s['due_tomorrow']} · 7d {s['due_week']}\n"
+        f"Examples saved: {s['examples']}/{s['total']}\n"
+        f"Avg ease: {s['avg_ease']:.2f}\n\n"
         f"*Verb forms*\n"
         f"Total: {vs['total']}\n"
-        f"Seen: {vs['seen']} ({verb_pct}%)\n"
-        f"Well-learned: {vs['known']}\n"
-        f"Due today: {vs['due']}",
+        f"Seen: {vs['seen']} ({verb_pct}%) · New left: {vs['unseen']}\n"
+        f"Learning: {vs['learning']} · Mature: {vs['known']}\n"
+        f"Due: today {vs['due']} · tomorrow {vs['due_tomorrow']} · 7d {vs['due_week']}\n"
+        f"Avg ease: {vs['avg_ease']:.2f}",
         parse_mode="Markdown",
     )
 
