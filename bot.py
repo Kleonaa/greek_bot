@@ -197,7 +197,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*/verbs* — practice future and past verb forms\n"
         "*/stats* — see your progress\n\n"
         "Each session gives you up to 30 due reviews + 15 new words.\n"
-        "Rate each card: ✅ Know it · 🤔 Hard · ❌ Don't know",
+        "Rate each card: ✅ Know it · 🤔 Hard · ❌ Don't know\n"
+        "Use 🚫 Don't show again for words you already know too well.",
         parse_mode="Markdown",
     )
 
@@ -242,6 +243,7 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Total: {s['total']}\n"
         f"Seen: {s['seen']} ({pct}%) · New left: {s['unseen']}\n"
         f"Learning: {s['learning']} · Mature: {s['known']}\n"
+        f"Don't show again: {s['hidden']}\n"
         f"Due: today {s['due']} · tomorrow {s['due_tomorrow']} · 7d {s['due_week']}\n"
         f"Examples saved: {s['examples']}/{s['total']}\n"
         f"Avg ease: {s['avg_ease']:.2f}\n\n"
@@ -298,10 +300,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("✅ Know it", callback_data=f"rate:{word_id}:5"),
             InlineKeyboardButton("🤔 Hard",    callback_data=f"rate:{word_id}:3"),
             InlineKeyboardButton("❌ No idea", callback_data=f"rate:{word_id}:0"),
+        ], [
+            InlineKeyboardButton("🚫 Don't show again", callback_data=f"hide:{word_id}"),
         ]]
         await query.edit_message_text(
             text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
         )
+
+    elif data.startswith("hide:"):
+        word_id = int(data.split(":")[1])
+        user_id = update.effective_user.id
+        db.hide_word(user_id, word_id)
+
+        await query.edit_message_reply_markup(reply_markup=None)
+
+        context.user_data["idx"] = context.user_data.get("idx", 0) + 1
+        await send_card(query.message.reply_text, context)
 
     elif data.startswith("rate:"):
         _, word_id_str, quality_str = data.split(":")
@@ -317,8 +331,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             db.update_progress(user_id, word_id, ef, interval, reps, next_review)
 
-        # Remove buttons from rated card
-        labels = {5: "✅ Know it", 3: "🤔 Hard", 0: "❌ No idea"}
         await query.edit_message_reply_markup(reply_markup=None)
 
         context.user_data["idx"] = context.user_data.get("idx", 0) + 1

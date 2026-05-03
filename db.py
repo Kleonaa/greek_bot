@@ -47,9 +47,13 @@ def init_db():
             interval INTEGER DEFAULT 0,
             repetitions INTEGER DEFAULT 0,
             next_review TEXT DEFAULT '2000-01-01',
+            hidden INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, word_id)
         )
     """)
+    c.execute("PRAGMA table_info(progress)")
+    columns = {row[1] for row in c.fetchall()}
+    add_column_if_missing(c, "progress", columns, "hidden INTEGER DEFAULT 0")
     c.execute("""
         CREATE TABLE IF NOT EXISTS verb_forms (
             id INTEGER PRIMARY KEY,
@@ -195,7 +199,7 @@ def get_session_words(user_id: int, max_reviews: int = 30, max_new: int = 15):
                p.ease_factor, p.interval, p.repetitions
         FROM words w
         JOIN progress p ON p.word_id = w.id AND p.user_id = ?
-        WHERE p.next_review <= ?
+        WHERE p.next_review <= ? AND p.hidden = 0
         ORDER BY p.next_review ASC
         LIMIT ?
         """,
@@ -325,6 +329,22 @@ def update_verb_progress(
     conn.close()
 
 
+def hide_word(user_id: int, word_id: int):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO progress (user_id, word_id, hidden)
+        VALUES (?, ?, 1)
+        ON CONFLICT(user_id, word_id) DO UPDATE SET
+            hidden = 1
+        """,
+        (user_id, word_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def save_example(word_id: int, example_gr: str, example_ru: str, example_form: str):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -351,40 +371,47 @@ def get_stats(user_id: int) -> dict:
         "SELECT COUNT(*) FROM progress WHERE user_id = ?", (user_id,)
     ).fetchone()[0]
     known = c.execute(
-        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND interval >= 21",
+        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND interval >= 21 AND hidden = 0",
         (user_id,),
     ).fetchone()[0]
     due = c.execute(
-        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND next_review <= ?",
+        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND next_review <= ? AND hidden = 0",
         (user_id, today),
+    ).fetchone()[0]
+    hidden = c.execute(
+        "SELECT COUNT(*) FROM progress WHERE user_id = ? AND hidden = 1",
+        (user_id,),
     ).fetchone()[0]
     due_tomorrow = c.execute(
         """
         SELECT COUNT(*) FROM progress
-        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        WHERE user_id = ? AND next_review > ? AND next_review <= ? AND hidden = 0
         """,
         (user_id, today, tomorrow),
     ).fetchone()[0]
     due_week = c.execute(
         """
         SELECT COUNT(*) FROM progress
-        WHERE user_id = ? AND next_review > ? AND next_review <= ?
+        WHERE user_id = ? AND next_review > ? AND next_review <= ? AND hidden = 0
         """,
         (user_id, today, next_week),
     ).fetchone()[0]
     avg_ease = c.execute(
-        "SELECT AVG(ease_factor) FROM progress WHERE user_id = ?", (user_id,)
+        "SELECT AVG(ease_factor) FROM progress WHERE user_id = ? AND hidden = 0",
+        (user_id,),
     ).fetchone()[0]
     examples = c.execute(
         "SELECT COUNT(*) FROM words WHERE example_gr IS NOT NULL"
     ).fetchone()[0]
+    active_seen = seen - hidden
     conn.close()
     return {
         "total": total,
         "seen": seen,
         "unseen": total - seen,
-        "learning": seen - known,
+        "learning": active_seen - known,
         "known": known,
+        "hidden": hidden,
         "due": due,
         "due_tomorrow": due_tomorrow,
         "due_week": due_week,
