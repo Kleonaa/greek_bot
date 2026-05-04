@@ -425,13 +425,14 @@ def get_stats(user_id: int) -> dict:
         "SELECT COUNT(*) FROM words WHERE example_gr IS NOT NULL"
     ).fetchone()[0]
     active_seen = seen - hidden
+    known_with_hidden = known + hidden
     conn.close()
     return {
         "total": total,
         "seen": seen,
         "unseen": total - seen,
         "learning": active_seen - known,
-        "known": known,
+        "known": known_with_hidden,
         "hidden": hidden,
         "due": due,
         "due_tomorrow": due_tomorrow,
