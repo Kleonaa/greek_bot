@@ -169,13 +169,13 @@ async def show_word_answer(query, word: dict, idx: int, total: int, context: Con
     )
     keyboard = [
         [
-            InlineKeyboardButton("✅ Know it", callback_data=f"rate:{word['id']}:5"),
-            InlineKeyboardButton("🤔 Hard", callback_data=f"rate:{word['id']}:3"),
-            InlineKeyboardButton("❌ No idea", callback_data=f"rate:{word['id']}:0"),
+            InlineKeyboardButton("🔄 Regenerate example", callback_data=f"regen:{word['id']}"),
+            InlineKeyboardButton("🚫 Know it - don't show", callback_data=f"hide:{word['id']}"),
         ],
         [
-            InlineKeyboardButton("🚫 Don't show again", callback_data=f"hide:{word['id']}"),
-            InlineKeyboardButton("🔄 Regenerate example", callback_data=f"regen:{word['id']}"),
+            InlineKeyboardButton("✅ Easy", callback_data=f"rate:{word['id']}:5"),
+            InlineKeyboardButton("🤔 Hard", callback_data=f"rate:{word['id']}:3"),
+            InlineKeyboardButton("❌ No idea", callback_data=f"rate:{word['id']}:0"),
         ],
     ]
     await query.edit_message_text(
@@ -235,8 +235,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*/verbs* — practice future and past verb forms\n"
         "*/stats* — see your progress\n\n"
         "Each session gives you up to 30 due reviews + 15 new words.\n"
-        "Rate each card: ✅ Know it · 🤔 Hard · ❌ Don't know\n"
-        "Use 🚫 Don't show again for words you already know too well.",
+        "Rate each card: ✅ Easy · 🤔 Hard · ❌ Don't know\n"
+        "Use 🚫 Know it - don't show for words you already know too well.",
         parse_mode="Markdown",
     )
 
