@@ -145,6 +145,44 @@ def format_word_verb_forms(greek_word: str):
     return f"\n\n🔮 Future: *{future}*\n🕰 Past: *{past}*"
 
 
+async def show_word_answer(query, word: dict, idx: int, total: int, context: ContextTypes.DEFAULT_TYPE):
+    verb_forms_text = format_word_verb_forms(word["greek"])
+
+    example_text = ""
+    if word["example_gr"]:
+        example_text = format_example_text(
+            word["example_gr"], word["example_ru"], word.get("example_form")
+        )
+    elif OPENAI_API_KEY:
+        await query.edit_message_text("⏳ Finishing example…")
+        gr, ru, form = await get_example(word, context)
+        if gr:
+            example_text = format_example_text(gr, ru, form)
+
+    text = (
+        f"*{idx + 1}/{total}*\n\n"
+        f"🇬🇷 *{word['greek']}*\n"
+        f"🇷🇺 {word['translation']}"
+        f"{verb_forms_text}"
+        f"{example_text}\n\n"
+        f"How well did you know it?"
+    )
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Know it", callback_data=f"rate:{word['id']}:5"),
+            InlineKeyboardButton("🤔 Hard", callback_data=f"rate:{word['id']}:3"),
+            InlineKeyboardButton("❌ No idea", callback_data=f"rate:{word['id']}:0"),
+        ],
+        [
+            InlineKeyboardButton("🚫 Don't show again", callback_data=f"hide:{word['id']}"),
+            InlineKeyboardButton("🔄 Regenerate example", callback_data=f"regen:{word['id']}"),
+        ],
+    ]
+    await query.edit_message_text(
+        text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def send_card(reply_fn, context: ContextTypes.DEFAULT_TYPE):
     session: list = context.user_data.get("session", [])
     idx: int = context.user_data.get("idx", 0)
@@ -273,39 +311,29 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Session expired. Use /study to start again.")
             return
 
-        verb_forms_text = format_word_verb_forms(word["greek"])
+        await show_word_answer(query, word, idx, len(session), context)
 
-        # Fetch / generate example
-        example_text = ""
-        if word["example_gr"]:
-            example_text = format_example_text(
-                word["example_gr"], word["example_ru"], word.get("example_form")
-            )
-        elif OPENAI_API_KEY:
-            await query.edit_message_text("⏳ Finishing example…")
-            gr, ru, form = await get_example(word, context)
-            if gr:
-                example_text = format_example_text(gr, ru, form)
+    elif data.startswith("regen:"):
+        word_id = int(data.split(":")[1])
+        session: list = context.user_data.get("session", [])
+        idx: int = context.user_data.get("idx", 0)
+        word = next((w for w in session if w["id"] == word_id), None)
+        if not word:
+            await query.edit_message_text("Session expired. Use /study to start again.")
+            return
+        if not OPENAI_API_KEY:
+            await query.edit_message_text("OpenAI API key is not configured.")
+            return
 
-        total = len(session)
-        text = (
-            f"*{idx + 1}/{total}*\n\n"
-            f"🇬🇷 *{word['greek']}*\n"
-            f"🇷🇺 {word['translation']}"
-            f"{verb_forms_text}"
-            f"{example_text}\n\n"
-            f"How well did you know it?"
-        )
-        keyboard = [[
-            InlineKeyboardButton("✅ Know it", callback_data=f"rate:{word_id}:5"),
-            InlineKeyboardButton("🤔 Hard",    callback_data=f"rate:{word_id}:3"),
-            InlineKeyboardButton("❌ No idea", callback_data=f"rate:{word_id}:0"),
-        ], [
-            InlineKeyboardButton("🚫 Don't show again", callback_data=f"hide:{word_id}"),
-        ]]
-        await query.edit_message_text(
-            text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("⏳ Regenerating example…")
+        gr, ru, form = await generate_example(word["greek"], word["translation"])
+        if gr:
+            db.save_example(word["id"], gr, ru, form or word["greek"])
+            word["example_gr"] = gr
+            word["example_ru"] = ru
+            word["example_form"] = form or word["greek"]
+
+        await show_word_answer(query, word, idx, len(session), context)
 
     elif data.startswith("hide:"):
         word_id = int(data.split(":")[1])
