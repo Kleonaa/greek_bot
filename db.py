@@ -275,6 +275,27 @@ def get_verb_forms_by_present(present: str):
     return row
 
 
+def save_verb_form(present: str, future: str, past: str, translation: str, notes: str = ""):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO verb_forms (
+            present, future, past, translation, notes
+        )
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(present) DO UPDATE SET
+            future = excluded.future,
+            past = excluded.past,
+            translation = excluded.translation,
+            notes = excluded.notes
+        """,
+        (present, future, past, translation, notes),
+    )
+    conn.commit()
+    conn.close()
+
+
 def update_progress(
     user_id: int,
     word_id: int,
